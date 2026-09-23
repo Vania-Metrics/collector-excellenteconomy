@@ -1,0 +1,14 @@
+# What the test server needs besides the core; read by the core's testkit (CollectorTestConfig).
+# The first jar of a list is the target plugin: its version is checked against compatibility.yml.
+# ExcellentEconomy 2.8.0 is compiled for Java 25, needs nightcore, and fails to enable without
+# Vault's classes although it only soft-depends on it: VaultUnlocked provides them.
+collectors: [economy]
+runtime: java25
+plugins:
+  bukkit:
+    - url: https://cdn.modrinth.com/data/r0FB9U1e/versions/aCWlZtuT/ExcellentEconomy-2.8.0.jar
+      sha512: 3cd452a69eb2f7fd0265fe28ca6f943023e3463f0a6d70a5f1a52675d0351e7bba36fe7d09fb527043038431a7b3120b1ffcc02c25198b2e72352a67fe4b323e
+    - url: https://cdn.modrinth.com/data/Y4NRwMW5/versions/vDmXDRvE/nightcore-2.16.4.jar
+      sha512: 7a3057a4dae271cd86eff7eba33479e50198d338c9cb27497fd9e1584640d22dc83b689ed7599a31eaf382084dc052d63c05262df3e662e776648e64f48d9c15
+    - url: https://cdn.modrinth.com/data/ayRaM8J7/versions/qZgRzoYs/VaultUnlocked-2.20.3.jar
+      sha512: 0eedea1591459e7e327315b43afa834a173c8c2ae31b3b235586d31963df29a4a6c0ef4b8f3fdc746e15afd47ee50c1ff93584543b5c2ef7c2a80135dba1136a
