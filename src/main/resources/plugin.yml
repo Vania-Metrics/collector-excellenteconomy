@@ -1,12 +1,13 @@
-# Métriques de l'économie — le MOUVEMENT, pas le total.
+# Economy metrics - the MOVEMENT, not the total.
 #
-# Le total en circulation vient du module essentials, qui lit le cache déjà
-# calculé d'EssentialsX. Celui-ci écoute ChangeBalanceEvent et dit qui gagne, qui
-# dépense, combien, dans quelle monnaie. Aucune lecture de base.
+# The total in circulation comes from the essentials module, which reads
+# EssentialsX's already-computed cache. This one listens to ChangeBalanceEvent
+# and reports who earns, who spends, how much, and in which currency. No
+# database reads.
 name: VaniaMetrics-Economy
 version: ${version}
 main: fr.samflix.vaniametrics.module.excellenteconomy.EconomyPaper
 api-version: '1.21'
 authors: [mc-vania]
-description: "Métriques ExcellentEconomy : transactions, flux, soldes."
+description: "ExcellentEconomy metrics: transactions, flow, balances."
 depend: [VaniaMetrics, ExcellentEconomy]

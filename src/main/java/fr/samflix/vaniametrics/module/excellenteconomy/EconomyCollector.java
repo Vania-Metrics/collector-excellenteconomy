@@ -18,159 +18,159 @@ import fr.samflix.vaniametrics.api.Counter;
 import fr.samflix.vaniametrics.api.Gauge;
 import fr.samflix.vaniametrics.api.MetricRegistry;
 import fr.samflix.vaniametrics.api.Platform;
-import fr.samflix.vaniametrics.api.Joueur;
+import fr.samflix.vaniametrics.api.PlayerRef;
 import fr.samflix.vaniametrics.api.PlayerSeries;
 
 /**
- * L'économie multi-monnaie d'ExcellentEconomy — par les événements, et par RÉFLEXION.
+ * ExcellentEconomy's multi-currency economy — by events, and by REFLECTION.
  *
- * <p>COMPLÉMENTAIRE DU MODULE {@code essentials}, qui donne le TOTAL en circulation en lisant le
- * cache déjà calculé d'EssentialsX. Celui-ci donne le MOUVEMENT : qui gagne, qui dépense, combien,
- * dans quelle monnaie. Un total qui ne bouge pas et un flux intense ne décrivent pas la même
- * économie, et aucune des deux métriques ne remplace l'autre.
+ * <p>COMPLEMENTS the {@code essentials} module, which gives the TOTAL in circulation by reading
+ * EssentialsX's already-computed cache. This one gives the MOVEMENT: who earns, who spends, how
+ * much, in which currency. A total that doesn't move and a heavy flow don't describe the same
+ * economy, and neither metric replaces the other.
  *
- * <p>POURQUOI DE LA RÉFLEXION ICI, ET NULLE PART AILLEURS. ExcellentEconomy est compilé en
- * <b>classe 69, c'est-à-dire Java 25</b> — vérifié dans son jar. Un javac qui vise Java 21 refuse
- * de LIRE un tel fichier, même pour une simple signature :
+ * <p>WHY REFLECTION HERE, AND NOWHERE ELSE. ExcellentEconomy is compiled as
+ * <b>class 69, i.e. Java 25</b> — verified in its jar. A javac targeting Java 21 refuses to READ
+ * such a file, even for a plain signature:
  *
  * <pre>
  * bad class file: ExcellentEconomy-2.8.0.jar(…/ChangeBalanceEvent.class)
  *   class file has wrong version 69.0, should be 65.0
  * </pre>
  *
- * <p>Les deux sorties propres étaient de compiler ce module en {@code --release 25}, ce qui impose
- * un JDK 25 pour construire tout le dépôt, ou de s'en passer. La réflexion est le troisième
- * chemin : le module reste compilable sur le JDK 21 du dépôt, et {@code registerEvent} accepte une
- * classe obtenue à l'exécution. Le prix est qu'un changement de signature chez NightExpress ne se
- * verra pas à la compilation — il se verra au démarrage, dans un avertissement, et le module se
- * taira au lieu de tomber.
+ * <p>The two clean options were compiling this module with {@code --release 25}, which forces a
+ * JDK 25 to build the whole repo, or dropping it. Reflection is the third path: the module stays
+ * compilable on the repo's JDK 21, and {@code registerEvent} accepts a class obtained at
+ * runtime. The cost is that a signature change on NightExpress's side won't show up at compile
+ * time — it will show up at startup, as a warning, and the module will stay silent instead of
+ * failing to build.
  */
 public final class EconomyCollector implements Collector, Listener {
 
-	private static final String CLASSE_EVENEMENT =
+	private static final String EVENT_CLASS =
 			"su.nightexpress.excellenteconomy.api.event.ChangeBalanceEvent";
 
-	private final Platform plateforme;
+	private final Platform platform;
 	private final Config config;
 
 	private Counter transactions;
-	private Counter flux;
-	private Gauge soldeJoueur;
+	private Counter flow;
+	private Gauge playerBalance;
 	private PlayerSeries series;
 
-	/** Le dernier solde connu de chaque joueur connecté, tenu à jour par les événements. */
-	private final Map<String, Map<String, Double>> soldes = new ConcurrentHashMap<>();
+	/** The last known balance of each online player, kept up to date by events. */
+	private final Map<String, Map<String, Double>> balances = new ConcurrentHashMap<>();
 
-	private Method lireJoueur;
-	private Method lireMonnaie;
-	private Method lireAncien;
-	private Method lireNouveau;
-	private Method lireIdMonnaie;
+	private Method getPlayerMethod;
+	private Method getCurrencyMethod;
+	private Method getOldAmountMethod;
+	private Method getNewAmountMethod;
+	private Method getCurrencyIdMethod;
 
-	public EconomyCollector(Platform plateforme, Config config) {
-		this.plateforme = plateforme;
+	public EconomyCollector(Platform platform, Config config) {
+		this.platform = platform;
 		this.config = config;
 	}
 
 	@Override
-	public String nom() {
+	public String name() {
 		return "economy";
 	}
 
 	@Override
-	public String origine() {
+	public String source() {
 		return "ExcellentEconomy";
 	}
 
 	@Override
-	public void declarer(MetricRegistry r) {
+	public void declare(MetricRegistry r) {
 		transactions = r.counter("economy_transactions_total",
-				"Mouvements de compte. type = deposit|withdraw.", "currency", "type");
-		flux = r.counter("economy_flow_total",
-				"Montants déplacés, en valeur absolue. direction = in|out. Le rapport des deux "
-						+ "dit si l'économie crée ou détruit de la monnaie.",
+				"Account movements. type = deposit|withdraw.", "currency", "type");
+		flow = r.counter("economy_flow_total",
+				"Amounts moved, as absolute values. direction = in|out. The ratio of the two "
+						+ "tells whether the economy is creating or destroying currency.",
 				"currency", "direction");
-		// « player » ET « uuid » : le pseudonyme pour lire, l'identifiant pour suivre. Voir Joueur.
-		soldeJoueur = r.gauge("economy_player_balance",
-				"Solde d'un joueur connecté. Mis à jour par événement, donc juste à la seconde — "
-						+ "aucune lecture de base.",
+		// Both "player" AND "uuid": the nickname for reading, the identifier for tracking. See PlayerRef.
+		playerBalance = r.gauge("economy_player_balance",
+				"Balance of an online player. Updated by event, so accurate to the second — "
+						+ "no database reads.",
 				"player", "uuid", "currency");
 		series = new PlayerSeries(r, config);
 	}
 
 	@Override
-	public void relever(MetricRegistry r) {
-		var connectes = Bukkit.getOnlinePlayers().stream()
-				.map(j -> Joueur.de(j.getUniqueId(), j.getName()))
+	public void collect(MetricRegistry r) {
+		var online = Bukkit.getOnlinePlayers().stream()
+				.map(p -> PlayerRef.of(p.getUniqueId(), p.getName()))
 				.toList();
-		for (Joueur qui : series.retenir(connectes, soldeJoueur)) {
-			Map<String, Double> m = soldes.get(qui.uuid());
+		for (PlayerRef ref : series.select(online, playerBalance)) {
+			Map<String, Double> m = balances.get(ref.uuid());
 			if (m != null) {
-				m.forEach((monnaie, valeur) -> soldeJoueur.set(valeur, qui.etiquettes(monnaie)));
+				m.forEach((currency, value) -> playerBalance.set(value, ref.labels(currency)));
 			}
 		}
 	}
 
 	/**
-	 * Branche l'écoute, ou se tait proprement.
+	 * Wires up the listener, or stays quiet.
 	 *
-	 * <p>{@code registerEvent} avec un {@code EventExecutor} est la forme que Bukkit expose
-	 * justement pour ce cas : l'annotation {@code @EventHandler} exige un type connu à la
-	 * compilation, celle-ci non.
+	 * <p>{@code registerEvent} with an {@code EventExecutor} is the form Bukkit exposes exactly
+	 * for this case: the {@code @EventHandler} annotation requires a type known at compile time,
+	 * this one isn't.
 	 *
-	 * @return vrai si l'écoute est en place.
+	 * @return true if the listener is in place.
 	 */
 	@SuppressWarnings("unchecked")
-	public boolean brancher(Plugin plugin) {
+	public boolean attach(Plugin plugin) {
 		try {
-			Class<?> evenement = Class.forName(CLASSE_EVENEMENT, false, plugin.getClass().getClassLoader());
-			lireJoueur = evenement.getMethod("getPlayer");
-			lireMonnaie = evenement.getMethod("getCurrency");
-			lireAncien = evenement.getMethod("getOldAmount");
-			lireNouveau = evenement.getMethod("getNewAmount");
-			lireIdMonnaie = lireMonnaie.getReturnType().getMethod("getId");
+			Class<?> eventClass = Class.forName(EVENT_CLASS, false, plugin.getClass().getClassLoader());
+			getPlayerMethod = eventClass.getMethod("getPlayer");
+			getCurrencyMethod = eventClass.getMethod("getCurrency");
+			getOldAmountMethod = eventClass.getMethod("getOldAmount");
+			getNewAmountMethod = eventClass.getMethod("getNewAmount");
+			getCurrencyIdMethod = getCurrencyMethod.getReturnType().getMethod("getId");
 
 			Bukkit.getPluginManager().registerEvent(
-					(Class<? extends Event>) evenement, this, EventPriority.MONITOR,
-					(ecouteur, e) -> traiter(e),
+					(Class<? extends Event>) eventClass, this, EventPriority.MONITOR,
+					(listener, e) -> handle(e),
 					plugin,
-					// ignoreCancelled : ChangeBalanceEvent est annulable, et une transaction
-					// refusée par un autre plugin ne doit pas être comptée — sinon on mesurerait
-					// les intentions et non les faits.
+					// ignoreCancelled: ChangeBalanceEvent is cancellable, and a transaction
+					// refused by another plugin must not be counted — otherwise we'd be
+					// measuring intent instead of fact.
 					true);
 			return true;
 		} catch (ReflectiveOperationException | RuntimeException e) {
-			plateforme.avertir("ExcellentEconomy : API inattendue, le flux monétaire ne sera pas "
-					+ "mesuré — " + e);
+			platform.warn("ExcellentEconomy: unexpected API, the money flow will not be "
+					+ "measured — " + e);
 			return false;
 		}
 	}
 
-	private void traiter(Event e) {
+	private void handle(Event e) {
 		try {
-			Object joueur = lireJoueur.invoke(e);
-			Object monnaie = lireMonnaie.invoke(e);
-			if (!(joueur instanceof Player p) || monnaie == null) {
+			Object player = getPlayerMethod.invoke(e);
+			Object currency = getCurrencyMethod.invoke(e);
+			if (!(player instanceof Player p) || currency == null) {
 				return;
 			}
-			String id = String.valueOf(lireIdMonnaie.invoke(monnaie)).toLowerCase(Locale.ROOT);
-			double ancien = ((Number) lireAncien.invoke(e)).doubleValue();
-			double nouveau = ((Number) lireNouveau.invoke(e)).doubleValue();
-			double delta = nouveau - ancien;
+			String id = String.valueOf(getCurrencyIdMethod.invoke(currency)).toLowerCase(Locale.ROOT);
+			double oldAmount = ((Number) getOldAmountMethod.invoke(e)).doubleValue();
+			double newAmount = ((Number) getNewAmountMethod.invoke(e)).doubleValue();
+			double delta = newAmount - oldAmount;
 
 			transactions.inc(id, delta >= 0 ? "deposit" : "withdraw");
-			flux.add(Math.abs(delta), id, delta >= 0 ? "in" : "out");
-			// Indexé par identifiant, comme partout : un renommage en cours de session ne doit
-			// pas scinder le solde d'un joueur sur deux clés.
-			soldes.computeIfAbsent(p.getUniqueId().toString(), k -> new ConcurrentHashMap<>())
-					.put(id, nouveau);
-		} catch (ReflectiveOperationException | RuntimeException erreur) {
-			plateforme.avertir("ExcellentEconomy : événement illisible — " + erreur);
+			flow.add(Math.abs(delta), id, delta >= 0 ? "in" : "out");
+			// Indexed by identifier, as everywhere else: a rename mid-session must not split
+			// a player's balance across two keys.
+			balances.computeIfAbsent(p.getUniqueId().toString(), k -> new ConcurrentHashMap<>())
+					.put(id, newAmount);
+		} catch (ReflectiveOperationException | RuntimeException error) {
+			platform.warn("ExcellentEconomy: unreadable event — " + error);
 		}
 	}
 
-	/** Voir le module betonquest : le plafond borne ce qui est publié, ceci ce qui est retenu. */
-	public void oublier(String joueur) {
-		soldes.remove(joueur);
+	/** See the betonquest module: the cap bounds what's published, this bounds what's retained. */
+	public void forget(String player) {
+		balances.remove(player);
 	}
 }

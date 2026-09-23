@@ -11,40 +11,40 @@ import fr.samflix.vaniametrics.api.VaniaMetrics;
 import fr.samflix.vaniametrics.api.VaniaMetricsProvider;
 
 /**
- * Métriques de l'économie ExcellentEconomy.
+ * ExcellentEconomy metrics.
  *
- * <p>C'est ici qu'est l'écoute de la déconnexion, et non dans le collecteur : celui-ci branche son
- * propre écouteur par réflexion, sur un seul type d'événement. Mélanger les deux mécaniques dans
- * une même classe rendrait le code difficile à suivre pour rien.
+ * <p>The quit listener lives here, not in the collector: the collector wires up its own
+ * listener via reflection, for a single event type. Mixing both mechanisms in one class would
+ * make the code harder to follow for no benefit.
  */
 public final class EconomyPaper extends JavaPlugin implements Listener {
 
-	private EconomyCollector collecteur;
+	private EconomyCollector collector;
 
 	@Override
 	public void onEnable() {
-		VaniaMetrics metriques = VaniaMetricsProvider.get();
-		collecteur = new EconomyCollector(metriques.plateforme(), metriques.config());
-		if (!collecteur.brancher(this)) {
-			// L'avertissement est déjà posé par le collecteur. On n'enregistre rien : des
-			// compteurs déclarés et jamais alimentés se liraient comme une économie morte.
+		VaniaMetrics metrics = VaniaMetricsProvider.get();
+		collector = new EconomyCollector(metrics.platform(), metrics.config());
+		if (!collector.attach(this)) {
+			// The warning was already logged by the collector. Nothing is registered: gauges
+			// declared but never fed would read like a dead economy.
 			return;
 		}
-		metriques.enregistrer(collecteur);
+		metrics.register(collector);
 		Bukkit.getPluginManager().registerEvents(this, this);
 	}
 
 	@Override
 	public void onDisable() {
-		if (collecteur != null) {
-			VaniaMetricsProvider.chercher().ifPresent(m -> m.retirer(collecteur));
+		if (collector != null) {
+			VaniaMetricsProvider.find().ifPresent(m -> m.unregister(collector));
 		}
 	}
 
 	@EventHandler(priority = EventPriority.MONITOR)
 	public void onQuit(PlayerQuitEvent e) {
-		if (collecteur != null) {
-			collecteur.oublier(e.getPlayer().getUniqueId().toString());
+		if (collector != null) {
+			collector.forget(e.getPlayer().getUniqueId().toString());
 		}
 	}
 }
